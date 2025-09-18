@@ -1,0 +1,17 @@
+{
+  "data_dir": "./data",
+  "days_before": 7,
+  "include": "",
+  "exclude": "",
+  "debug": false,
+  "email": {
+    "enabled": true,
+    "to": "your-email@example.com",
+    "from": "your-gmail@gmail.com",
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "username": "your-gmail@gmail.com",
+    "password": "your-app-password-here",
+    "only_changes": true
+  }
+}

@@ -1,0 +1,24 @@
+# BCF Events Monitor - Crontab Example
+# Add one of these lines to your crontab (run 'crontab -e' to edit)
+
+# Run daily at 9:00 AM
+0 9 * * * /home/zhanz32/Github/bcf-events-monitor/run_daily_monitor.sh
+
+# Run daily at 6:00 PM
+0 18 * * * /home/zhanz32/Github/bcf-events-monitor/run_daily_monitor.sh
+
+# Run weekdays only at 9:00 AM
+0 9 * * 1-5 /home/zhanz32/Github/bcf-events-monitor/run_daily_monitor.sh
+
+# Run twice daily (9 AM and 6 PM)
+0 9,18 * * * /home/zhanz32/Github/bcf-events-monitor/run_daily_monitor.sh
+
+# To set up:
+# 1. Edit your crontab: crontab -e
+# 2. Add one of the lines above (adjust the path as needed)
+# 3. Save and exit
+# 4. Verify with: crontab -l
+
+# Optional: Set email for notifications
+# Add this line to receive email notifications:
+# MAILTO=your-email@example.com
