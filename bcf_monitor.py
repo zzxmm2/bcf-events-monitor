@@ -65,6 +65,27 @@ def parse_date(text: str):
 
 
 def nearest_heading_text(elem) -> Optional[str]:
+    # First, try to find a more specific heading that's not generic
+    for heading in elem.find_all_previous(["h1", "h2", "h3", "h4", "h5"]):
+        heading_text = " ".join(heading.get_text(" ").split())
+        # Skip generic headings
+        if heading_text.lower() not in ["upcoming events", "events", "tournaments", "chess events"]:
+            return heading_text
+    
+    # If no specific heading found, try to find the event name in the link text or nearby text
+    # Look for text that might be the event name in the same container
+    parent = elem.find_parent(["div", "section", "article", "td", "li"])
+    if parent:
+        # Look for text that's not generic and seems like an event name
+        for text_elem in parent.find_all(["span", "div", "p", "strong", "b"]):
+            text = " ".join(text_elem.get_text(" ").split())
+            if (text and len(text) > 5 and 
+                text.lower() not in ["register online now", "upcoming events", "events", "tournaments", "chess events", "date", "time", "location"] and
+                not text.startswith("http") and
+                not re.match(r"^\d+$", text)):
+                return text
+    
+    # Fallback to original logic
     heading = elem.find_previous(["h1", "h2", "h3", "h4", "h5"])
     if heading:
         return " ".join(heading.get_text(" ").split())
@@ -164,7 +185,25 @@ def parse_event_details(html: str):
     soup = BeautifulSoup(html, "html.parser")
     details = {}
     
-    # Look for event details in tables
+    # Try to extract event name from the page title or main heading
+    event_name = None
+    
+    # Look for page title
+    title_tag = soup.find("title")
+    if title_tag:
+        title_text = title_tag.get_text(" ").strip()
+        # Clean up title to get event name
+        if title_text and "boylston" not in title_text.lower():
+            event_name = title_text
+    
+    # Look for main heading (h1)
+    h1_tag = soup.find("h1")
+    if h1_tag:
+        h1_text = h1_tag.get_text(" ").strip()
+        if h1_text and h1_text.lower() not in ["upcoming events", "events", "tournaments"]:
+            event_name = h1_text
+    
+    # Look for event name in tables
     for table in soup.find_all("table"):
         for tr in table.find_all("tr"):
             cells = [c.get_text(" ").strip() for c in tr.find_all(["td", "th"])]
@@ -173,6 +212,9 @@ def parse_event_details(html: str):
                 value = cells[1].strip()
                 if key and value:
                     details[key] = value
+                    # If we find a name field, use it
+                    if key in ["name", "event name", "tournament name", "title"]:
+                        event_name = value
     
     # Also look for details in definition lists or other structures
     for dt in soup.find_all("dt"):
@@ -182,6 +224,13 @@ def parse_event_details(html: str):
             value = dd.get_text(" ").strip()
             if key and value:
                 details[key] = value
+                # If we find a name field, use it
+                if key in ["name", "event name", "tournament name", "title"]:
+                    event_name = value
+    
+    # Store the event name if found
+    if event_name:
+        details["event_name"] = event_name
     
     return details
 
@@ -190,6 +239,22 @@ def parse_entry_list(html: str):
     """Parse entry list from tournament entries page."""
     soup = BeautifulSoup(html, "html.parser")
     participants = []
+    
+    # Extract event name from page title
+    event_name = None
+    title_tag = soup.find("title")
+    if title_tag:
+        title_text = title_tag.get_text(" ").strip()
+        # Extract event name from title like "Registration List • Unrated Friday Night Blitz • Boylston Chess Foundation"
+        if "•" in title_text:
+            parts = [part.strip() for part in title_text.split("•")]
+            if len(parts) >= 2:
+                event_name = parts[1]  # Second part should be the event name
+        elif "Registration List" in title_text:
+            # Fallback: try to extract from "Registration List &bull; Event Name &bull; Boylston Chess Foundation"
+            match = re.search(r"Registration List[^•]*•\s*([^•]+)\s*•", title_text)
+            if match:
+                event_name = match.group(1).strip()
 
     # First, try to find the specific "members" table (BCF format)
     members_table = soup.find("table", id="members")
@@ -267,7 +332,7 @@ def parse_entry_list(html: str):
             seen.add(p["name"])
             unique_participants.append(p)
     
-    return unique_participants
+    return unique_participants, event_name
 
 
 def load_snapshot(path: str):
@@ -625,7 +690,7 @@ def main():
         print(f"[ERR] fetch events page failed: {e}", file=sys.stderr)
         sys.exit(2)
 
-    events = [e for e in parse_events_page(events_html) if match_rules(e["name"]) and within_days(e["date"], days_before)]
+    events = [e for e in parse_events_page(events_html) if within_days(e["date"], days_before)]
 
     if not events:
         print("[INFO] No events within window matching rules.")
@@ -641,13 +706,26 @@ def main():
             try:
                 detail_html = http_get(e["event_detail_url"], insecure=True)
                 event_details = parse_event_details(detail_html)
+                # Use event name from details if available and better than the one from events page
+                if event_details.get("event_name") and event_details["event_name"].lower() not in ["upcoming events", "events", "tournaments"]:
+                    e["name"] = event_details["event_name"]
             except Exception as ex:
                 print(f"[WARN] fetch event details failed for {e['event_id']}: {ex}", file=sys.stderr)
         
         # Fetch entry list
         try:
             entry_html = http_get(e["entry_list_url"], insecure=True)
-            participants = parse_entry_list(entry_html)
+            participants, entry_event_name = parse_entry_list(entry_html)
+            
+            # Use event name from entry list if available and better than current name
+            if entry_event_name and entry_event_name.lower() not in ["upcoming events", "events", "tournaments"]:
+                e["name"] = entry_event_name
+            
+            # Apply filtering rules now that we have the proper event name
+            if not match_rules(e["name"]):
+                print(f"[INFO] Event '{e['name']}' filtered out by include/exclude rules")
+                continue
+            
             if not participants:
                 print(f"[DEBUG] No participants found for event {e['event_id']}. Entry list URL: {e['entry_list_url']}", file=sys.stderr)
                 if debug:
