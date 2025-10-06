@@ -127,38 +127,75 @@ def parse_events_page(html: str):
     soup = BeautifulSoup(html, "html.parser")
     events = []
     
-    # Look for "Register Online Now" links which lead to event detail pages
+    # Look for "Register Online Now" links within event cards (works for featured and regular cards)
     for a in soup.find_all("a", href=True):
         if "Register Online Now" in a.get_text():
-            # Extract event ID from the href
             href = a["href"]
-            if "/events/" in href:
-                event_id_match = re.search(r"/events/(\d+)", href)
-                if event_id_match:
-                    event_id = event_id_match.group(1)
-                    # Find the event name from the nearest heading
-                    name = nearest_heading_text(a) or "Unknown Event"
-                    # Find the event date
-                    date_value = find_event_date(a)
-                    # Construct URLs
-                    event_detail_url = urljoin(BASE_URL, href)
-                    entry_list_url = urljoin(BASE_URL, f"/tournament/entries/{event_id}")
-                    
-                    events.append(
-                        {
-                            "event_id": event_id,
-                            "name": name,
-                            "date": date_value.isoformat() if date_value else None,
-                            "event_detail_url": event_detail_url,
-                            "entry_list_url": entry_list_url,
-                        }
-                    )
+            # Extract event ID from common patterns
+            event_id_match = (
+                re.search(r"/events/(\d+)", href)
+                or re.search(r"/tournament/register/(\d+)", href)
+                or re.search(r"/tournament/entries/(\d+)", href)
+            )
+            if not event_id_match:
+                continue
+            event_id = event_id_match.group(1)
+
+            # Resolve the enclosing title block to get a reliable event name and detail URL
+            title_block = a.find_parent("div", class_="title")
+            detail_link = None
+            event_name = None
+            if title_block:
+                # Prefer the first anchor that points to the event details
+                for tlink in title_block.find_all("a", href=True):
+                    if re.search(r"^/events/\d+", tlink["href"]):
+                        detail_link = tlink
+                        event_name = " ".join(tlink.get_text(" ").split())
+                        break
+
+            # Fallbacks when not found in title block
+            if not detail_link:
+                # Try to find a sibling link in the same event panel
+                panel = a.find_parent("div", class_="panel")
+                if panel:
+                    for tlink in panel.find_all("a", href=True):
+                        if re.search(r"^/events/\d+", tlink["href"]):
+                            detail_link = tlink
+                            if not event_name:
+                                event_name = " ".join(tlink.get_text(" ").split())
+                            break
+
+            # Final fallback for name
+            if not event_name:
+                event_name = nearest_heading_text(a) or "Unknown Event"
+
+            # Find the event date from the same block
+            date_value = find_event_date(a)
+
+            events.append(
+                {
+                    "event_id": event_id,
+                    "name": event_name,
+                    "date": date_value.isoformat() if date_value else None,
+                    "event_detail_url": urljoin(BASE_URL, detail_link["href"]) if detail_link else None,
+                    "entry_list_url": urljoin(BASE_URL, f"/tournament/entries/{event_id}"),
+                }
+            )
     
-    # Also look for direct entry list links as fallback
+    # Also look for direct entry list links as fallback (in case featured cards omit the register button)
     for a in soup.find_all("a", href=True):
         if re.match(r"^/tournament/entries/\d+$", a["href"]):
             entry_url = urljoin(BASE_URL, a["href"])
-            name = nearest_heading_text(a) or "Unknown Event"
+            # Prefer the title link text within the same event card if available
+            event_name = None
+            panel = a.find_parent("div", class_="panel")
+            if panel:
+                title_block = panel.find("div", class_="title")
+                if title_block:
+                    tlink = title_block.find("a", href=re.compile(r"^/events/\d+"))
+                    if tlink:
+                        event_name = " ".join(tlink.get_text(" ").split())
+            name = event_name or (nearest_heading_text(a) or "Unknown Event")
             date_value = find_event_date(a)
             event_id = re.search(r"/entries/(\d+)", a["href"]).group(1)
             
@@ -169,7 +206,7 @@ def parse_events_page(html: str):
                         "event_id": event_id,
                         "name": name,
                         "date": date_value.isoformat() if date_value else None,
-                        "event_detail_url": None,
+                        "event_detail_url": urljoin(BASE_URL, tlink["href"]) if panel and title_block and title_block.find("a", href=re.compile(r"^/events/\d+")) else None,
                         "entry_list_url": entry_url,
                     }
                 )
