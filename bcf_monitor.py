@@ -126,91 +126,73 @@ def find_event_date(elem):
 def parse_events_page(html: str):
     soup = BeautifulSoup(html, "html.parser")
     events = []
-    
-    # Look for "Register Online Now" links within event cards (works for featured and regular cards)
-    for a in soup.find_all("a", href=True):
-        if "Register Online Now" in a.get_text():
-            href = a["href"]
-            # Extract event ID from common patterns
-            event_id_match = (
-                re.search(r"/events/(\d+)", href)
-                or re.search(r"/tournament/register/(\d+)", href)
-                or re.search(r"/tournament/entries/(\d+)", href)
-            )
-            if not event_id_match:
-                continue
-            event_id = event_id_match.group(1)
 
-            # Resolve the enclosing title block to get a reliable event name and detail URL
-            title_block = a.find_parent("div", class_="title")
-            detail_link = None
-            event_name = None
-            if title_block:
-                # Prefer the first anchor that points to the event details
-                for tlink in title_block.find_all("a", href=True):
-                    if re.search(r"^/events/\d+", tlink["href"]):
-                        detail_link = tlink
-                        event_name = " ".join(tlink.get_text(" ").split())
-                        break
+    container = soup.find("div", id="events") or soup.find(id="events")
 
-            # Fallbacks when not found in title block
-            if not detail_link:
-                # Try to find a sibling link in the same event panel
-                panel = a.find_parent("div", class_="panel")
-                if panel:
-                    for tlink in panel.find_all("a", href=True):
-                        if re.search(r"^/events/\d+", tlink["href"]):
-                            detail_link = tlink
-                            if not event_name:
-                                event_name = " ".join(tlink.get_text(" ").split())
-                            break
+    def extract_event_from_block(block):
+        detail_link = None
+        event_name = None
+        entry_link_tag = None
+        event_id = None
 
-            # Final fallback for name
+        title_block = block.find("div", class_="title")
+        if title_block:
+            # Prefer an event detail link inside the title
+            for tlink in title_block.find_all("a", href=True):
+                if re.search(r"^/events/\d+", tlink.get("href", "")):
+                    detail_link = tlink
+                    event_name = " ".join(tlink.get_text(" ").split())
+                    break
+            # Fallback to first link text for name
             if not event_name:
-                event_name = nearest_heading_text(a) or "Unknown Event"
+                any_link = title_block.find("a", href=True)
+                if any_link:
+                    event_name = " ".join(any_link.get_text(" ").split())
 
-            # Find the event date from the same block
-            date_value = find_event_date(a)
+        # Scan all links in the block to find event id and entry list link
+        for a in block.find_all("a", href=True):
+            href = a.get("href", "")
+            if not event_id:
+                m = (re.search(r"/events/(\d+)", href)
+                     or re.search(r"/tournament/register/(\d+)", href)
+                     or re.search(r"/tournament/entries/(\d+)", href))
+                if m:
+                    event_id = m.group(1)
+            if not entry_link_tag and re.match(r"^/tournament/entries/\d+$", href):
+                entry_link_tag = a
 
+        if not event_name:
+            event_name = nearest_heading_text(block) or "Unknown Event"
+
+        # Choose an anchor near the date (detail link or any link), fallback to the block itself
+        anchor_for_date = detail_link or entry_link_tag or block
+        date_value = find_event_date(anchor_for_date)
+
+        event_detail_url = urljoin(BASE_URL, detail_link["href"]) if detail_link else None
+        if entry_link_tag:
+            entry_list_url = urljoin(BASE_URL, entry_link_tag["href"])
+        elif event_id:
+            entry_list_url = urljoin(BASE_URL, f"/tournament/entries/{event_id}")
+        else:
+            entry_list_url = None
+
+        if event_id or entry_list_url:
             events.append(
                 {
-                    "event_id": event_id,
+                    "event_id": event_id or (re.search(r"/entries/(\d+)", entry_link_tag["href"]).group(1) if entry_link_tag else ""),
                     "name": event_name,
                     "date": date_value.isoformat() if date_value else None,
-                    "event_detail_url": urljoin(BASE_URL, detail_link["href"]) if detail_link else None,
-                    "entry_list_url": urljoin(BASE_URL, f"/tournament/entries/{event_id}"),
+                    "event_detail_url": event_detail_url,
+                    "entry_list_url": entry_list_url,
                 }
             )
-    
-    # Also look for direct entry list links as fallback (in case featured cards omit the register button)
-    for a in soup.find_all("a", href=True):
-        if re.match(r"^/tournament/entries/\d+$", a["href"]):
-            entry_url = urljoin(BASE_URL, a["href"])
-            # Prefer the title link text within the same event card if available
-            event_name = None
-            panel = a.find_parent("div", class_="panel")
-            if panel:
-                title_block = panel.find("div", class_="title")
-                if title_block:
-                    tlink = title_block.find("a", href=re.compile(r"^/events/\d+"))
-                    if tlink:
-                        event_name = " ".join(tlink.get_text(" ").split())
-            name = event_name or (nearest_heading_text(a) or "Unknown Event")
-            date_value = find_event_date(a)
-            event_id = re.search(r"/entries/(\d+)", a["href"]).group(1)
-            
-            # Check if we already have this event
-            if not any(e["event_id"] == event_id for e in events):
-                events.append(
-                    {
-                        "event_id": event_id,
-                        "name": name,
-                        "date": date_value.isoformat() if date_value else None,
-                        "event_detail_url": urljoin(BASE_URL, tlink["href"]) if panel and title_block and title_block.find("a", href=re.compile(r"^/events/\d+")) else None,
-                        "entry_list_url": entry_url,
-                    }
-                )
-    
+
+    if container:
+        # Treat each direct child of the container as an event block
+        for child in container.find_all(recursive=False):
+            if getattr(child, "name", None):
+                extract_event_from_block(child)
+
     unique_by_id = {}
     for ev in events:
         unique_by_id.setdefault(ev["event_id"], ev)
@@ -727,10 +709,11 @@ def main():
         print(f"[ERR] fetch events page failed: {e}", file=sys.stderr)
         sys.exit(2)
 
-    events = [e for e in parse_events_page(events_html) if within_days(e["date"], days_before)]
-
+    # Parse events from listing page without filtering by date yet.
+    # We'll enrich event names and dates from details/entry pages first.
+    events = parse_events_page(events_html)
     if not events:
-        print("[INFO] No events within window matching rules.")
+        print("[INFO] No events discovered on events listing page.")
         cleanup_expired(data_dir)
         return
 
@@ -746,6 +729,14 @@ def main():
                 # Use event name from details if available and better than the one from events page
                 if event_details.get("event_name") and event_details["event_name"].lower() not in ["upcoming events", "events", "tournaments"]:
                     e["name"] = event_details["event_name"]
+                # Try to extract/normalize event date from details if missing
+                if not e.get("date"):
+                    for k in ["date", "event date", "tournament date"]:
+                        if k in event_details and event_details[k]:
+                            parsed_dt = parse_date(event_details[k])
+                            if parsed_dt:
+                                e["date"] = parsed_dt.isoformat()
+                                break
             except Exception as ex:
                 print(f"[WARN] fetch event details failed for {e['event_id']}: {ex}", file=sys.stderr)
         
@@ -761,6 +752,11 @@ def main():
             # Apply filtering rules now that we have the proper event name
             if not match_rules(e["name"]):
                 print(f"[INFO] Event '{e['name']}' filtered out by include/exclude rules")
+                continue
+
+            # Now that we've attempted to populate date, apply the date window filter
+            if not within_days(e.get("date"), days_before):
+                # Skip events outside the monitoring window
                 continue
             
             if not participants:
@@ -805,6 +801,11 @@ def main():
                 "event_details": event_details,
             }
         )
+
+    if not reports:
+        print("[INFO] No events within window matching rules.")
+        cleanup_expired(data_dir)
+        return
 
     today_str = datetime.now().strftime("%Y-%m-%d")
     print(f"BCF event updates ({today_str})")
