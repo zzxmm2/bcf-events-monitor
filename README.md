@@ -1,14 +1,17 @@
 # BCF Events Monitor
 
-A Python script to monitor upcoming events on the Boylston Chess Foundation website and track participant changes for events within one week.
+A professional Python monitoring system for Boylston Chess Foundation events. The system has been refactored into a modular architecture for better maintainability, testability, and extensibility.
 
 ## Features
 
 - **Event Discovery**: Automatically finds upcoming events from the BCF events page
 - **Event Details**: Fetches detailed information from individual event pages
 - **Entry List Monitoring**: Tracks participant registrations and withdrawals
+- **Smart Date Parsing**: Handles single dates, ranges, and multiple day events automatically
 - **Daily Summaries**: Provides detailed reports of changes for events within 1 week
 - **Snapshot Management**: Stores daily snapshots and automatically cleans up expired events
+- **Email Notifications**: Sends HTML and plain text email reports with participant changes
+- **Modular Architecture**: Professional, maintainable codebase with clear separation of concerns
 - **Automated Monitoring**: Includes cron script for daily automated checks
 
 ## Installation
@@ -31,7 +34,11 @@ pip install -r requirements.txt
 Run the monitor manually to check for updates:
 
 ```bash
-python bcf_monitor.py
+# New modular version (recommended)
+python3 bcf_monitor_main.py
+
+# Legacy version (still supported)
+python3 bcf_monitor.py
 ```
 
 ### Configuration File
@@ -39,6 +46,10 @@ python bcf_monitor.py
 The easiest way to configure the monitor is using a configuration file. Create one with:
 
 ```bash
+# New modular version (recommended)
+python3 bcf_monitor_main.py --create-config
+
+# Legacy version
 python3 bcf_monitor.py --create-config
 ```
 
@@ -91,25 +102,25 @@ Examples:
 
 ```bash
 # Create and edit configuration file
-python3 bcf_monitor.py --create-config
+python3 bcf_monitor_main.py --create-config
 # Edit bcf_monitor_config.json with your settings
 
 # Run with configuration file (recommended)
-python3 bcf_monitor.py
+python3 bcf_monitor_main.py
 
 # Override specific settings from command line
-python3 bcf_monitor.py --days-before 3
-python3 bcf_monitor.py --include "Open"
-python3 bcf_monitor.py --exclude "Scholastic"
+python3 bcf_monitor_main.py --days-before 3
+python3 bcf_monitor_main.py --include "Open"
+python3 bcf_monitor_main.py --exclude "Scholastic"
 
 # Use different configuration file
-python3 bcf_monitor.py --config my_config.json
+python3 bcf_monitor_main.py --config my_config.json
 
 # Enable email notifications (if not in config file)
-python3 bcf_monitor.py --email --email-to your-email@example.com
+python3 bcf_monitor_main.py --email --email-to your-email@example.com
 
 # Email only when there are changes
-python3 bcf_monitor.py --email-only-changes
+python3 bcf_monitor_main.py --email-only-changes
 ```
 
 ### Email Notifications
@@ -118,7 +129,11 @@ The monitor can send email notifications when participant changes are detected. 
 
 #### Method 1: Command Line Arguments
 ```bash
-python bcf_monitor.py --email --email-to your-email@example.com --email-username your-gmail@gmail.com --email-password your-app-password
+# New modular version (recommended)
+python3 bcf_monitor_main.py --email --email-to your-email@example.com --email-username your-gmail@gmail.com --email-password your-app-password
+
+# Legacy version
+python3 bcf_monitor.py --email --email-to your-email@example.com --email-username your-gmail@gmail.com --email-password your-app-password
 ```
 
 #### Method 2: Environment Variables
@@ -131,7 +146,11 @@ export BCF_EMAIL_PASSWORD="your-app-password"
 export BCF_EMAIL_SMTP_SERVER="smtp.gmail.com"
 export BCF_EMAIL_SMTP_PORT="587"
 
-python bcf_monitor.py --email
+# New modular version (recommended)
+python3 bcf_monitor_main.py --email
+
+# Legacy version
+python3 bcf_monitor.py --email
 ```
 
 #### Gmail Setup
@@ -182,22 +201,57 @@ The script provides detailed reports showing:
 
 Example output:
 ```
-BCF event updates (2025-01-15)
+BCF event updates (2025-10-21)
 ==================================================
 
-📅 $15 Open
-   Date: 2025-01-21
-   Participants: 5 (+1 -0)
-   Entry Fee: $15
-   Time Control: G/60 d5
-   Sections: Open & U1800
+📅 ALTO (At Least Twenty-One) - https://boylstonchess.org/events/1429/alto-at-least-twenty-one
+   Date: 2025-10-26
+   Participants: 1 (no changes)
+   📝 Entry List: https://boylstonchess.org/tournament/entries/1429
+
+📅 November Quads - https://boylstonchess.org/events/1428/november-quads
+   Date: 2025-11-01
+   Participants: 1 (+1 -0)
    ✅ New participants:
-      • John Smith (1850) [Open]
-   📋 Event Details: https://boylstonchess.org/events/1408/15-open
-   📝 Entry List: https://boylstonchess.org/tournament/entries/1408
+      • Jim Jin (unr)
+   📝 Entry List: https://boylstonchess.org/tournament/entries/1428
+
+📅 Weekend Tournament - https://boylstonchess.org/events/1430/weekend-tournament
+   Date: 2025-10-25 to 2025-10-27
+   Participants: 8 (+2 -1)
+   ✅ New participants:
+      • Alice Johnson (1650) [Open]
+      • Bob Wilson (1420) [U1600]
+   ❌ Withdrawn participants:
+      • Charlie Brown (1580) [Open]
+   📝 Entry List: https://boylstonchess.org/tournament/entries/1430
 
 ==================================================
 ```
+
+### Multiple Date Events
+
+The system handles various date formats automatically:
+
+- **Single Date**: `2025-10-26`
+- **Date Ranges**: `2025-10-25 to 2025-10-27` (shows start and end)
+- **Multiple Days**: `2025-10-25, 2025-10-27` (comma-separated)
+- **And-separated**: `2025-10-25 and 2025-10-27`
+- **Range Format**: `October 25-27, 2025` (automatically expanded to all days)
+
+The system intelligently parses and displays dates in the most readable format for each event type.
+
+#### Date Parsing Examples
+
+The system can handle various input formats and automatically converts them:
+
+| Input Format | Parsed Result | Display Format |
+|-------------|---------------|----------------|
+| `January 15-17, 2024` | `2024-01-15, 2024-01-16, 2024-01-17` | `2025-01-15 to 2025-01-17` |
+| `January 15, 17, 2024` | `2024-01-15, 2024-01-17` | `2025-01-15, 2025-01-17` |
+| `January 15 and 17, 2024` | `2024-01-15, 2024-01-17` | `2025-01-15, 2025-01-17` |
+| `January 15, 2024` | `2024-01-15` | `2025-01-15` |
+| `2024-01-15` | `2024-01-15` | `2025-01-15` |
 
 ## Data Storage
 
@@ -210,20 +264,56 @@ The script stores daily snapshots in JSON format in the data directory. Each sna
 
 Snapshots are automatically deleted after events have passed.
 
-## File Structure
+## Architecture
+
+The BCF Events Monitor has been refactored into a professional modular architecture for better maintainability, testability, and extensibility.
+
+### Benefits of the New Architecture
+
+- **Modular Design**: Each component has a single, clear responsibility
+- **Easy Testing**: Individual components can be unit tested in isolation
+- **Better Maintainability**: Changes to one component don't affect others
+- **Professional Structure**: Follows Python packaging best practices
+- **Backward Compatibility**: All existing functionality preserved
+- **Enhanced Error Handling**: Component-specific error handling and logging
+- **Advanced Date Parsing**: Robust handling of complex date formats and ranges
+- **Improved Email System**: Professional HTML and plain text email notifications
+
+### Package Structure
+
+```
+bcf_monitor/                   # Main package directory
+├── __init__.py               # Package initialization and exports
+├── config.py                 # Configuration management
+├── http_client.py            # HTTP client for web requests
+├── parsers.py                # HTML parsing logic
+├── email_notifier.py         # Email notification system
+└── monitor.py                # Main monitoring orchestrator
+```
+
+### File Structure
 
 ```
 bcf-events-monitor/
-├── bcf_monitor.py              # Main monitoring script
-├── run_daily_monitor.sh        # Cron script for automated monitoring
-├── requirements.txt            # Python dependencies
-├── README.md                  # This file
-├── bcf_monitor_config.json    # Configuration file (created with --create-config)
-├── config_example.json        # Example configuration file
-├── email_config_example.sh    # Example email environment variables
-├── crontab_example.txt        # Example crontab entries
-└── data/                      # Snapshot storage directory (created automatically)
-    ├── 1408.json             # Event snapshots
+├── bcf_monitor_main.py        # New modular main script (recommended)
+├── bcf_monitor.py             # Legacy script (backward compatibility)
+├── bcf_monitor/               # Modular package directory
+│   ├── __init__.py
+│   ├── config.py
+│   ├── http_client.py
+│   ├── parsers.py
+│   ├── email_notifier.py
+│   └── monitor.py
+├── run_daily_monitor.sh       # Cron script (auto-detects version)
+├── requirements.txt           # Python dependencies
+├── README.md                 # This file
+├── REFACTORING_SUMMARY.md    # Detailed refactoring documentation
+├── bcf_monitor_config.json   # Configuration file (created with --create-config)
+├── config_example.json       # Example configuration file
+├── email_config_example.sh   # Example email environment variables
+├── crontab_example.txt       # Example crontab entries
+└── data/                     # Snapshot storage directory (created automatically)
+    ├── 1408.json            # Event snapshots
     └── 1405.json
 ```
 
@@ -233,12 +323,50 @@ bcf-events-monitor/
 - `beautifulsoup4`: HTML parsing
 - `certifi`: SSL certificate verification
 
+## Migration Guide
+
+### From Legacy to Modular Version
+
+The new modular system maintains 100% backward compatibility:
+
+1. **Configuration**: Same configuration file format
+2. **Command Line**: All existing arguments supported
+3. **Output**: Identical console output format
+4. **Data**: Existing snapshots and logs preserved
+
+### Quick Migration Steps
+
+1. **Test the new system**:
+   ```bash
+   python3 bcf_monitor_main.py --help
+   ```
+
+2. **Run with your existing configuration**:
+   ```bash
+   python3 bcf_monitor_main.py
+   ```
+
+3. **Update your cron jobs** (optional):
+   ```bash
+   # Old
+   python3 bcf_monitor.py
+   
+   # New (recommended)
+   python3 bcf_monitor_main.py
+   ```
+
+The shell script (`run_daily_monitor.sh`) automatically detects and uses the new version when available.
+
 ## Troubleshooting
 
 ### SSL Certificate Issues
 If you encounter SSL certificate errors, the script includes fallback handling, but you can also run with:
 ```bash
-python bcf_monitor.py --insecure
+# New modular version
+python3 bcf_monitor_main.py --insecure
+
+# Legacy version
+python3 bcf_monitor.py --insecure
 ```
 
 ### Network Timeouts

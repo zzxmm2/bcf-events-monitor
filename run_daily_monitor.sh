@@ -34,9 +34,15 @@ log "Starting BCF Events Monitor daily check"
 # Change to script directory
 cd "$SCRIPT_DIR"
 
-# Check if Python script exists
-if [ ! -f "bcf_monitor.py" ]; then
-    log "ERROR: bcf_monitor.py not found in $SCRIPT_DIR"
+# Check if Python script exists (try new modular version first, fallback to old)
+if [ -f "bcf_monitor_main.py" ]; then
+    MONITOR_SCRIPT="bcf_monitor_main.py"
+    log "Using refactored modular version: bcf_monitor_main.py"
+elif [ -f "bcf_monitor.py" ]; then
+    MONITOR_SCRIPT="bcf_monitor.py"
+    log "Using legacy version: bcf_monitor.py"
+else
+    log "ERROR: Neither bcf_monitor_main.py nor bcf_monitor.py found in $SCRIPT_DIR"
     exit 1
 fi
 
@@ -52,10 +58,10 @@ log "Running BCF events monitor..."
 # Build command - use config file if it exists, otherwise use environment variables
 if [ -f "bcf_monitor_config.json" ]; then
     log "Using configuration file: bcf_monitor_config.json"
-    MONITOR_CMD="python3 bcf_monitor.py"
+    MONITOR_CMD="python3 $MONITOR_SCRIPT"
 else
     log "No configuration file found, using environment variables"
-    MONITOR_CMD="python3 bcf_monitor.py --data-dir \"$DATA_DIR\""
+    MONITOR_CMD="python3 $MONITOR_SCRIPT --data-dir \"$DATA_DIR\""
     
     # Add email options if environment variables are set
     if [ -n "$BCF_EMAIL_TO" ] && [ -n "$BCF_EMAIL_USERNAME" ] && [ -n "$BCF_EMAIL_PASSWORD" ]; then
