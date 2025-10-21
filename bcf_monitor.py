@@ -64,6 +64,117 @@ def parse_date(text: str):
     return None
 
 
+def parse_multiple_dates(text: str):
+    """Parse text that may contain multiple dates or date ranges."""
+    if not text:
+        return []
+    
+    # Clean up the text
+    cleaned = re.sub(r"\s+", " ", text.strip())
+    dates = []
+    
+    # Extract month and year information first
+    # Look for month followed by year, but allow other text in between
+    month_year_match = re.search(r"([A-Za-z]+).*?(\d{4})", cleaned)
+    if not month_year_match:
+        # Fallback to single date parsing
+        single_date = parse_date(cleaned)
+        if single_date:
+            return [single_date]
+        return []
+    
+    month_name = month_year_match.group(1)
+    year = int(month_year_match.group(2))
+    
+    try:
+        month_num = datetime.strptime(month_name, "%B").month
+    except ValueError:
+        # Fallback to single date parsing
+        single_date = parse_date(cleaned)
+        if single_date:
+            return [single_date]
+        return []
+    
+    # Check if it's a range pattern (contains '-')
+    if '-' in cleaned:
+        # Split by '-' and parse start and end dates
+        parts = cleaned.split('-')
+        if len(parts) == 2:
+            start_text = parts[0].strip()
+            end_text = parts[1].strip()
+            
+            # Remove day of week from start and end
+            start_clean = re.sub(r"^[A-Za-z]+,\s*", "", start_text)
+            end_clean = re.sub(r"^[A-Za-z]+,\s*", "", end_text)
+            
+            # Add year to both dates if not present
+            if str(year) not in start_clean:
+                start_clean = f"{start_clean}, {year}"
+            if str(year) not in end_clean:
+                end_clean = f"{end_clean}, {year}"
+            
+            start_date = parse_date(start_clean)
+            end_date = parse_date(end_clean)
+            
+            if start_date and end_date:
+                current = start_date
+                while current <= end_date:
+                    dates.append(current)
+                    current += timedelta(days=1)
+                return dates
+    
+    # Handle individual days (contains 'and' keyword)
+    elif 'and' in cleaned:
+        # Extract all day numbers from the text
+        day_numbers = []
+        
+        # Split by comma and 'and' to get individual day numbers
+        parts = re.split(r',\s*and\s*|,\s*', cleaned)
+        for part in parts:
+            # Extract day numbers from each part
+            numbers = re.findall(r'\b(\d{1,2})\b', part)
+            for num_str in numbers:
+                day = int(num_str)
+                if 1 <= day <= 31 and day != year:  # Exclude year
+                    day_numbers.append(day)
+        
+        # Create dates from day numbers
+        for day in day_numbers:
+            dates.append(datetime(year, month_num, day).date())
+        
+        if dates:
+            return sorted(dates)
+    
+    # Handle comma-separated days without 'and' keyword
+    elif ',' in cleaned:
+        # Extract all day numbers from the text
+        day_numbers = []
+        
+        # Split by comma to get individual day numbers
+        parts = cleaned.split(',')
+        for part in parts:
+            # Extract day numbers from each part
+            numbers = re.findall(r'\b(\d{1,2})\b', part)
+            for num_str in numbers:
+                day = int(num_str)
+                if 1 <= day <= 31 and day != year:  # Exclude year
+                    day_numbers.append(day)
+        
+        # Create dates from day numbers
+        for day in day_numbers:
+            dates.append(datetime(year, month_num, day).date())
+        
+        if dates:
+            return sorted(dates)
+    
+    # Fallback to single date parsing
+    single_date = parse_date(cleaned)
+    if single_date:
+        return [single_date]
+    
+    return []
+
+
 def nearest_heading_text(elem) -> Optional[str]:
     # First, try to find a more specific heading that's not generic
     for heading in elem.find_all_previous(["h1", "h2", "h3", "h4", "h5"]):
@@ -95,32 +206,38 @@ def nearest_heading_text(elem) -> Optional[str]:
     return None
 
 
-def find_event_date(elem):
+def find_event_dates(elem):
+    """Find event dates, handling both single dates and multiple dates/ranges."""
     block = elem.find_parent(["table", "div", "section", "article"]) or elem.parent
     if not block:
-        return None
+        return []
+    
+    # Look in table rows first
     for tr in block.find_all("tr"):
         cells = [td.get_text(" ").strip() for td in tr.find_all(["td", "th"])]
         if not cells:
             continue
         if re.search(r"^date$", cells[0], re.I) and len(cells) > 1:
-            parsed = parse_date(cells[1])
-            if parsed:
-                return parsed
+            dates = parse_multiple_dates(cells[1])
+            if dates:
+                return dates
+    
+    # Look for date labels
     labels = block.find_all(string=re.compile(r"^\s*Date\s*$", re.I))
     for lab in labels:
         sib = lab.parent.find_next(string=True)
         if sib:
-            parsed = parse_date(sib)
-            if parsed:
-                return parsed
+            dates = parse_multiple_dates(sib)
+            if dates:
+                return dates
+    
+    # Look for date patterns in the text
     txt = " ".join(block.get_text(" ").split())
-    m = re.search(r"(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),?\s+[A-Za-z]+\s+\d{1,2},\s+\d{4}", txt)
-    if m:
-        parsed = parse_date(m.group(0))
-        if parsed:
-            return parsed
-    return None
+    dates = parse_multiple_dates(txt)
+    if dates:
+        return dates
+    
+    return []
 
 
 def parse_events_page(html: str):
@@ -166,7 +283,7 @@ def parse_events_page(html: str):
 
         # Choose an anchor near the date (detail link or any link), fallback to the block itself
         anchor_for_date = detail_link or entry_link_tag or block
-        date_value = find_event_date(anchor_for_date)
+        date_values = find_event_dates(anchor_for_date)
 
         event_detail_url = urljoin(BASE_URL, detail_link["href"]) if detail_link else None
         if entry_link_tag:
@@ -181,7 +298,7 @@ def parse_events_page(html: str):
                 {
                     "event_id": event_id or (re.search(r"/entries/(\d+)", entry_link_tag["href"]).group(1) if entry_link_tag else ""),
                     "name": event_name,
-                    "date": date_value.isoformat() if date_value else None,
+                    "dates": [d.isoformat() for d in date_values] if date_values else [],
                     "event_detail_url": event_detail_url,
                     "entry_list_url": entry_list_url,
                 }
@@ -413,30 +530,40 @@ def diff_lists(old_list, new_list):
     return added, removed
 
 
-def within_days(event_date_iso: Optional[str], days_before: int) -> bool:
-    if not event_date_iso:
+def within_days(event_dates: list, days_before: int) -> bool:
+    """Check if any of the event dates are within the monitoring window."""
+    if not event_dates:
         return False
-    try:
-        # Parse ISO date string (YYYY-MM-DD format)
-        event_date = datetime.strptime(event_date_iso, "%Y-%m-%d").date()
-    except Exception:
-        return False
+    
     today = datetime.now(timezone.utc).astimezone().date()
-    if event_date < today:
-        return False
-    return (event_date - today).days <= days_before
+    
+    for date_str in event_dates:
+        try:
+            # Parse ISO date string (YYYY-MM-DD format)
+            event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            if event_date >= today and (event_date - today).days <= days_before:
+                return True
+        except Exception:
+            continue
+    return False
 
 
-def expired(event_date_iso: Optional[str]) -> bool:
-    if not event_date_iso:
-        return False
-    try:
-        # Parse ISO date string (YYYY-MM-DD format)
-        event_date = datetime.strptime(event_date_iso, "%Y-%m-%d").date()
-    except Exception:
-        return False
+def expired(event_dates: list) -> bool:
+    """Check if all event dates have passed."""
+    if not event_dates:
+        return True
+    
     today = datetime.now(timezone.utc).astimezone().date()
-    return event_date < today
+    
+    for date_str in event_dates:
+        try:
+            # Parse ISO date string (YYYY-MM-DD format)
+            event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            if event_date >= today:
+                return False  # At least one date is in the future
+        except Exception:
+            continue
+    return True  # All dates are in the past or invalid
 
 
 def cleanup_expired(data_dir: str):
@@ -450,7 +577,7 @@ def cleanup_expired(data_dir: str):
             snap = load_snapshot(path)
             if not snap:
                 continue
-            if expired(snap.get("event_date")):
+            if expired(snap.get("event_dates", [])):
                 os.remove(path)
                 print(f"[INFO] removed expired snapshot {fn}")
         except Exception:
@@ -493,9 +620,18 @@ def send_email_notification(reports: list, email_config: dict):
                     text_body += f"📅 {r['name']}\n"
                     html_body.append(f"<p>📅 {r['name']}</p>")
 
-                text_body += f"   Date: {r['date']}\n"
+                # Format dates - single date or list
+                dates = r.get("dates", [])
+                if len(dates) == 1:
+                    date_display = dates[0]
+                elif len(dates) > 1:
+                    date_display = f"[{', '.join(dates)}]"
+                else:
+                    date_display = "TBD"
+                
+                text_body += f"   Date: {date_display}\n"
                 text_body += f"   Participants: {r['count']}\n"
-                html_body.append(f"<div>Date: {r['date']}</div>")
+                html_body.append(f"<div>Date: {date_display}</div>")
                 html_body.append(f"<div>Participants: {r['count']}</div>")
                 
                 # Show key event details if available (but no explicit Event Details URL line)
@@ -751,13 +887,13 @@ def main():
                 # Use event name from details if available and better than the one from events page
                 if event_details.get("event_name") and event_details["event_name"].lower() not in ["upcoming events", "events", "tournaments"]:
                     e["name"] = event_details["event_name"]
-                # Try to extract/normalize event date from details if missing
-                if not e.get("date"):
+                # Try to extract/normalize event dates from details if missing
+                if not e.get("dates"):
                     for k in ["date", "event date", "tournament date"]:
                         if k in event_details and event_details[k]:
-                            parsed_dt = parse_date(event_details[k])
-                            if parsed_dt:
-                                e["date"] = parsed_dt.isoformat()
+                            parsed_dates = parse_multiple_dates(event_details[k])
+                            if parsed_dates:
+                                e["dates"] = [d.isoformat() for d in parsed_dates]
                                 break
             except Exception as ex:
                 print(f"[WARN] fetch event details failed for {e['event_id']}: {ex}", file=sys.stderr)
@@ -776,8 +912,8 @@ def main():
                 print(f"[INFO] Event '{e['name']}' filtered out by include/exclude rules")
                 continue
 
-            # Now that we've attempted to populate date, apply the date window filter
-            if not within_days(e.get("date"), days_before):
+            # Now that we've attempted to populate dates, apply the date window filter
+            if not within_days(e.get("dates", []), days_before):
                 # Skip events outside the monitoring window
                 continue
             
@@ -801,7 +937,7 @@ def main():
         snapshot = {
             "event_id": e["event_id"],
             "event_name": e["name"],
-            "event_date": e["date"],
+            "event_dates": e.get("dates", []),
             "event_detail_url": e.get("event_detail_url"),
             "entry_list_url": e["entry_list_url"],
             "event_details": event_details,
@@ -814,7 +950,7 @@ def main():
         reports.append(
             {
                 "name": e["name"],
-                "date": e["date"],
+                "dates": e.get("dates", []),
                 "detail_url": e.get("event_detail_url"),
                 "entry_url": e["entry_list_url"],
                 "count": len(participants),
@@ -840,7 +976,17 @@ def main():
             print(f"\n📅 {r['name']} - {r['detail_url']}")
         else:
             print(f"\n📅 {r['name']}")
-        print(f"   Date: {r['date']}")
+        
+        # Format dates - single date or list
+        dates = r.get("dates", [])
+        if len(dates) == 1:
+            date_display = dates[0]
+        elif len(dates) > 1:
+            date_display = f"{dates[0]} to {dates[-1]}" if len(dates) > 2 else ", ".join(dates)
+        else:
+            date_display = "TBD"
+        
+        print(f"   Date: {date_display}")
         print(f"   Participants: {r['count']} {delta}")
         
         # Show key event details if available
