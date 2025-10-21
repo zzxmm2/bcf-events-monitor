@@ -303,7 +303,7 @@ class BCFMonitor:
                     with open(debug_file, "w", encoding="utf-8") as f:
                         f.write(entry_html)
                     print(f"[DEBUG] Saved HTML to {debug_file}", file=sys.stderr)
-                return None
+                # Continue processing even with no participants (like legacy script)
                 
         except Exception as ex:
             print(f"[WARN] fetch/parse entry list failed for {event_id}: {ex}", file=sys.stderr)
@@ -397,7 +397,9 @@ class BCFMonitor:
                     else:
                         print(f"      • {participant}")
             
-            print(f"   📝 Entry List: {report['entry_url']}")
+            # Only show Entry List if there are participants
+            if report['count'] > 0:
+                print(f"   📝 Entry List: {report['entry_url']}")
         
         print("\n" + "=" * 50)
     

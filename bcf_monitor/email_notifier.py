@@ -201,7 +201,11 @@ class EmailNotifier:
                 else:
                     text += f"      • {participant}\n"
         
-        text += f"   📝 Entry List: {report['entry_url']}\n\n"
+        # Only show Entry List if there are participants
+        if report['count'] > 0:
+            text += f"   📝 Entry List: {report['entry_url']}\n\n"
+        else:
+            text += "\n"
         
         return text
     
@@ -257,6 +261,8 @@ class EmailNotifier:
                     html_parts.append(f"<li>{participant}</li>")
             html_parts.append("</ul>")
         
-        html_parts.append(f"<div>📝 Entry List: <a href=\"{report['entry_url']}\">{report['entry_url']}</a></div>")
+        # Only show Entry List if there are participants
+        if report['count'] > 0:
+            html_parts.append(f"<div>📝 Entry List: <a href=\"{report['entry_url']}\">{report['entry_url']}</a></div>")
         
         return "".join(html_parts)

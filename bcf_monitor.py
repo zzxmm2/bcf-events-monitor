@@ -666,9 +666,12 @@ def send_email_notification(reports: list, email_config: dict):
                             html_body.append(f"<li>{p}</li>")
                     html_body.append("</ul>")
 
-                # No explicit "Event Details" line anymore
-                text_body += f"   📝 Entry List: {r['entry_url']}\n\n"
-                html_body.append(f"<div>📝 Entry List: <a href=\"{r['entry_url']}\">{r['entry_url']}</a></div>")
+                # Only show Entry List if there are participants
+                if r['count'] > 0:
+                    text_body += f"   📝 Entry List: {r['entry_url']}\n\n"
+                    html_body.append(f"<div>📝 Entry List: <a href=\"{r['entry_url']}\">{r['entry_url']}</a></div>")
+                else:
+                    text_body += "\n"
 
         html_body.append("<hr/>")
         html_body.append("<div>This is an automated message from BCF Events Monitor.</div>")
@@ -1012,7 +1015,9 @@ def main():
                 else:
                     print(f"      • {p}")
         
-        print(f"   📝 Entry List: {r['entry_url']}")
+        # Only show Entry List if there are participants
+        if r['count'] > 0:
+            print(f"   📝 Entry List: {r['entry_url']}")
     
     print("\n" + "=" * 50)
 
