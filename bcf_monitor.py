@@ -463,64 +463,86 @@ def send_email_notification(reports: list, email_config: dict):
         return False
     
     try:
-        # Create message
-        msg = MIMEMultipart()
+        # Create message with plain text and HTML alternatives
+        msg = MIMEMultipart('alternative')
         msg['From'] = email_config.get("from", EMAIL_FROM)
         msg['To'] = email_config.get("to")
         msg['Subject'] = f"BCF Events Update - {datetime.now().strftime('%Y-%m-%d')}"
         
-        # Create email body
-        body = f"BCF Events Monitor Update\n"
-        body += f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        body += "=" * 50 + "\n\n"
+        # Create plain text body
+        text_body = f"BCF Events Monitor Update\n"
+        text_body += f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        text_body += "=" * 50 + "\n\n"
+
+        # Create HTML body
+        html_body = []
+        html_body.append("<html><body>")
+        html_body.append(f"<p><strong>BCF Events Monitor Update</strong><br/>Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>")
+        html_body.append("<hr/>")
         
         if not reports:
-            body += "No events found within the monitoring window.\n"
+            text_body += "No events found within the monitoring window.\n"
+            html_body.append("<p>No events found within the monitoring window.</p>")
         else:
             for r in reports:
-                body += f"📅 {r['name']}\n"
-                body += f"   Date: {r['date']}\n"
-                body += f"   Participants: {r['count']}\n"
+                # Title line with link in HTML; plain text shows URL inline
+                if r.get("detail_url"):
+                    text_body += f"📅 {r['name']} - {r['detail_url']}\n"
+                    html_body.append(f"<p>📅 <a href=\"{r['detail_url']}\">{r['name']}</a></p>")
+                else:
+                    text_body += f"📅 {r['name']}\n"
+                    html_body.append(f"<p>📅 {r['name']}</p>")
+
+                text_body += f"   Date: {r['date']}\n"
+                text_body += f"   Participants: {r['count']}\n"
+                html_body.append(f"<div>Date: {r['date']}</div>")
+                html_body.append(f"<div>Participants: {r['count']}</div>")
                 
-                # Show key event details if available
-                if r.get("event_details"):
-                    details = r["event_details"]
-                    if details.get("entry fee"):
-                        body += f"   Entry Fee: {details['entry fee']}\n"
-                    if details.get("time control"):
-                        body += f"   Time Control: {details['time control']}\n"
-                    if details.get("sections"):
-                        body += f"   Sections: {details['sections']}\n"
+                # Show key event details if available (but no explicit Event Details URL line)
+                # Note: Entry Fee, Time Control, and Sections fields removed per user request
                 
                 # Show changes
                 if r["added"]:
-                    body += f"   ✅ New participants:\n"
+                    text_body += f"   ✅ New participants:\n"
+                    html_body.append("<div>✅ New participants:</div><ul>")
                     for p in r["added"]:
                         if isinstance(p, dict):
                             rating_info = f" ({p['rating']})" if p.get("rating") else ""
                             section_info = f" [{p['section']}]" if p.get("section") else ""
-                            body += f"      • {p['name']}{rating_info}{section_info}\n"
+                            text_body += f"      • {p['name']}{rating_info}{section_info}\n"
+                            html_body.append(f"<li>{p['name']}{rating_info}{section_info}</li>")
                         else:
-                            body += f"      • {p}\n"
+                            text_body += f"      • {p}\n"
+                            html_body.append(f"<li>{p}</li>")
+                    html_body.append("</ul>")
                 
                 if r["removed"]:
-                    body += f"   ❌ Withdrawn participants:\n"
+                    text_body += f"   ❌ Withdrawn participants:\n"
+                    html_body.append("<div>❌ Withdrawn participants:</div><ul>")
                     for p in r["removed"]:
                         if isinstance(p, dict):
                             rating_info = f" ({p['rating']})" if p.get("rating") else ""
                             section_info = f" [{p['section']}]" if p.get("section") else ""
-                            body += f"      • {p['name']}{rating_info}{section_info}\n"
+                            text_body += f"      • {p['name']}{rating_info}{section_info}\n"
+                            html_body.append(f"<li>{p['name']}{rating_info}{section_info}</li>")
                         else:
-                            body += f"      • {p}\n"
-                
-                if r.get("detail_url"):
-                    body += f"   📋 Event Details: {r['detail_url']}\n"
-                body += f"   📝 Entry List: {r['entry_url']}\n\n"
+                            text_body += f"      • {p}\n"
+                            html_body.append(f"<li>{p}</li>")
+                    html_body.append("</ul>")
+
+                # No explicit "Event Details" line anymore
+                text_body += f"   📝 Entry List: {r['entry_url']}\n\n"
+                html_body.append(f"<div>📝 Entry List: <a href=\"{r['entry_url']}\">{r['entry_url']}</a></div>")
+
+        html_body.append("<hr/>")
+        html_body.append("<div>This is an automated message from BCF Events Monitor.</div>")
+        html_body.append("</body></html>")
         
-        body += "\n" + "=" * 50 + "\n"
-        body += "This is an automated message from BCF Events Monitor.\n"
+        text_body += "\n" + "=" * 50 + "\n"
+        text_body += "This is an automated message from BCF Events Monitor.\n"
         
-        msg.attach(MIMEText(body, 'plain'))
+        msg.attach(MIMEText(text_body, 'plain'))
+        msg.attach(MIMEText("\n".join(html_body), 'html'))
         
         # Send email
         server = smtplib.SMTP(email_config.get("smtp_server", EMAIL_SMTP_SERVER), 
@@ -813,19 +835,16 @@ def main():
     
     for r in reports:
         delta = f"(+{len(r['added'])} -{len(r['removed'])})" if (r["added"] or r["removed"]) else "(no changes)"
-        print(f"\n📅 {r['name']}")
+        # Make title clickable if detail_url exists by printing URL on same line
+        if r.get("detail_url"):
+            print(f"\n📅 {r['name']} - {r['detail_url']}")
+        else:
+            print(f"\n📅 {r['name']}")
         print(f"   Date: {r['date']}")
         print(f"   Participants: {r['count']} {delta}")
         
         # Show key event details if available
-        if r.get("event_details"):
-            details = r["event_details"]
-            if details.get("entry fee"):
-                print(f"   Entry Fee: {details['entry fee']}")
-            if details.get("time control"):
-                print(f"   Time Control: {details['time control']}")
-            if details.get("sections"):
-                print(f"   Sections: {details['sections']}")
+        # Note: Entry Fee, Time Control, and Sections fields removed per user request
         
         if r["added"]:
             print(f"   ✅ New participants:")
@@ -847,8 +866,6 @@ def main():
                 else:
                     print(f"      • {p}")
         
-        if r.get("detail_url"):
-            print(f"   📋 Event Details: {r['detail_url']}")
         print(f"   📝 Entry List: {r['entry_url']}")
     
     print("\n" + "=" * 50)
